@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,16 +31,15 @@ func init() {
 var slackAPI *slack.Client
 
 func main() {
+	var port int
+	flag.IntVar(&port, "port", 8888, "listen port number")
+	flag.Parse()
+
 	slackAPI = slack.New(
 		os.Getenv("SLACK_BOT_TOKEN"),
 		slack.OptionAppLevelToken(os.Getenv("SLACK_APP_TOKEN")),
 		slack.OptionDebug(Debug),
 		slack.OptionLog(log.New(os.Stdout, "api: ", log.Lshortfile|log.LstdFlags)),
-	)
-	socketMode := socketmode.New(
-		slackAPI,
-		socketmode.OptionDebug(Debug),
-		socketmode.OptionLog(log.New(os.Stdout, "sm: ", log.Lshortfile|log.LstdFlags)),
 	)
 	authTest, authTestErr := slackAPI.AuthTest()
 	if authTestErr != nil {
@@ -46,16 +48,32 @@ func main() {
 	}
 	log.Println("selfUserID", authTest.UserID)
 
-	go runWebSocketServer(context.TODO())
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go runWebSocketServer(ctx, &wg, port)
+	go runSocketModeReceiver(ctx, &wg)
+	wg.Wait()
+}
+
+func runSocketModeReceiver(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	sm := socketmode.New(
+		slackAPI,
+		socketmode.OptionDebug(Debug),
+		socketmode.OptionLog(log.New(os.Stdout, "sm: ", log.Lshortfile|log.LstdFlags)),
+	)
 	go func() {
-		for envelope := range socketMode.Events {
+		for envelope := range sm.Events {
 			log.Printf("Event received type: %s, event: %#v", envelope.Type, envelope.Data)
 			switch envelope.Type {
 			case socketmode.EventTypeEventsAPI:
 				// イベント API のハンドリング
 				// 3 秒以内にとりあえず ack
-				socketMode.Ack(*envelope.Request)
+				sm.Ack(*envelope.Request)
 				eventPayload, _ := envelope.Data.(slackevents.EventsAPIEvent)
 				switch eventPayload.Type {
 				case slackevents.CallbackEvent:
@@ -63,17 +81,17 @@ func main() {
 					case *slackevents.MessageEvent:
 						pubsub.Publish(event)
 					default:
-						socketMode.Debugf("Skipped: %v", event)
+						sm.Debugf("Skipped: %v", event)
 					}
 				default:
-					socketMode.Debugf("unsupported Events API eventPayload received")
+					sm.Debugf("unsupported Events API eventPayload received")
 				}
 			default:
-				socketMode.Debugf("Skipped: %v", envelope.Type)
+				sm.Debugf("Skipped: %v", envelope.Type)
 			}
 		}
 	}()
-	socketMode.Run()
+	sm.RunContext(ctx)
 }
 
 var upgrader = websocket.Upgrader{} // use default options
@@ -128,10 +146,27 @@ func (p *PubSub) Close() {
 
 type message interface{}
 
-func runWebSocketServer(ctx context.Context) {
-	http.HandleFunc("/websocket/", wsFunc)
-	http.HandleFunc("/connect/", connectFunc)
-	log.Fatal(http.ListenAndServe(":8888", nil))
+func runWebSocketServer(ctx context.Context, wg *sync.WaitGroup, port int) {
+	defer wg.Done()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/websocket/", wsFunc)
+	mux.HandleFunc("/connect/", connectFunc)
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: mux,
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			if ctx.Err() != context.Canceled {
+				log.Println("[error]", err)
+			}
+		}
+	}()
+	<-ctx.Done()
+	log.Println("[info] shutdown websocket server")
+	pubsub.Close()
+	srv.Shutdown(ctx)
 }
 
 type ConnectResponse struct {
@@ -141,7 +176,12 @@ type ConnectResponse struct {
 }
 
 func connectFunc(w http.ResponseWriter, r *http.Request) {
-	channelID := strings.Split(r.URL.Path, "/")[2]
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	channelID := parts[2]
 	log.Println("[info] new connection for", channelID)
 	var users []slack.User
 	if channelID != "" {
@@ -166,9 +206,11 @@ func connectFunc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Header.Set("Content-Type", "application/json")
+	wsURL := fmt.Sprintf("ws://%s%s/websocket/", r.Host, r.URL.Port())
+	log.Println("[info] websocket url", wsURL)
 	json.NewEncoder(w).Encode(ConnectResponse{
 		OK:    true,
-		URL:   "ws://localhost:8888/websocket/",
+		URL:   wsURL,
 		Users: users,
 	})
 }
