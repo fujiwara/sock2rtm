@@ -135,12 +135,8 @@ func runWebSocketServer(ctx context.Context) {
 }
 
 type ConnectResponse struct {
-	OK       bool     `json:"ok"`
-	URL      string   `json:"url"`
-	Metadata Metadata `json:"metadata"`
-}
-
-type Metadata struct {
+	OK    bool         `json:"ok"`
+	URL   string       `json:"url"`
 	Users []slack.User `json:"users"`
 }
 
@@ -171,11 +167,9 @@ func connectFunc(w http.ResponseWriter, r *http.Request) {
 
 	r.Header.Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ConnectResponse{
-		OK:  true,
-		URL: "ws://localhost:8888/websocket/",
-		Metadata: Metadata{
-			Users: users,
-		},
+		OK:    true,
+		URL:   "ws://localhost:8888/websocket/",
+		Users: users,
 	})
 }
 
