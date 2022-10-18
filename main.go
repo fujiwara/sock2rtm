@@ -151,7 +151,7 @@ func runWebSocketServer(ctx context.Context, wg *sync.WaitGroup, port int) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/websocket/", wsFunc)
-	mux.HandleFunc("/connect/", connectFunc)
+	mux.HandleFunc("/start/", startFunc)
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
@@ -169,13 +169,13 @@ func runWebSocketServer(ctx context.Context, wg *sync.WaitGroup, port int) {
 	srv.Shutdown(ctx)
 }
 
-type ConnectResponse struct {
+type StartResponse struct {
 	OK    bool         `json:"ok"`
 	URL   string       `json:"url"`
 	Users []slack.User `json:"users"`
 }
 
-func connectFunc(w http.ResponseWriter, r *http.Request) {
+func startFunc(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 3 {
 		w.WriteHeader(http.StatusBadRequest)
@@ -208,7 +208,7 @@ func connectFunc(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("Content-Type", "application/json")
 	wsURL := fmt.Sprintf("ws://%s%s/websocket/", r.Host, r.URL.Port())
 	log.Println("[info] websocket url", wsURL)
-	json.NewEncoder(w).Encode(ConnectResponse{
+	json.NewEncoder(w).Encode(StartResponse{
 		OK:    true,
 		URL:   wsURL,
 		Users: users,

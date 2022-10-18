@@ -4,7 +4,7 @@ use AnySan;
 use AnySan::Provider::Slack;
 use Data::Dumper;
 BEGIN {
-	$AnyEvent::SlackRTM::START_URL = "http://localhost:8888/connect/C7MK19D8F";
+	$AnyEvent::SlackRTM::START_URL = "http://localhost:8888/start/C7MK19D8F";
 }
 
 my $slack = slack(
