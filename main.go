@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -23,26 +25,28 @@ func init() {
 	Debug, _ = strconv.ParseBool(os.Getenv("DEBUG"))
 }
 
-func main() {
-	go runWebSocketServer(context.TODO())
+var slackAPI *slack.Client
 
-	webApi := slack.New(
+func main() {
+	slackAPI = slack.New(
 		os.Getenv("SLACK_BOT_TOKEN"),
 		slack.OptionAppLevelToken(os.Getenv("SLACK_APP_TOKEN")),
 		slack.OptionDebug(Debug),
 		slack.OptionLog(log.New(os.Stdout, "api: ", log.Lshortfile|log.LstdFlags)),
 	)
 	socketMode := socketmode.New(
-		webApi,
+		slackAPI,
 		socketmode.OptionDebug(Debug),
 		socketmode.OptionLog(log.New(os.Stdout, "sm: ", log.Lshortfile|log.LstdFlags)),
 	)
-	authTest, authTestErr := webApi.AuthTest()
+	authTest, authTestErr := slackAPI.AuthTest()
 	if authTestErr != nil {
 		fmt.Fprintf(os.Stderr, "SLACK_BOT_TOKEN is invalid: %v\n", authTestErr)
 		os.Exit(1)
 	}
 	log.Println("selfUserID", authTest.UserID)
+
+	go runWebSocketServer(context.TODO())
 
 	go func() {
 		for envelope := range socketMode.Events {
@@ -125,19 +129,53 @@ func (p *PubSub) Close() {
 type message interface{}
 
 func runWebSocketServer(ctx context.Context) {
-	http.HandleFunc("/websocket", wsFunc)
-	http.HandleFunc("/connect", connectFunc)
+	http.HandleFunc("/websocket/", wsFunc)
+	http.HandleFunc("/connect/", connectFunc)
 	log.Fatal(http.ListenAndServe(":8888", nil))
 }
 
+type ConnectResponse struct {
+	OK       bool     `json:"ok"`
+	URL      string   `json:"url"`
+	Metadata Metadata `json:"metadata"`
+}
+
+type Metadata struct {
+	Users []slack.User `json:"users"`
+}
+
 func connectFunc(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(struct {
-		OK  bool   `json:"ok"`
-		URL string `json:"url"`
-	}{
+	channelID := strings.Split(r.URL.Path, "/")[2]
+	log.Println("[info] new connection for", channelID)
+	var users []slack.User
+	if channelID != "" {
+		userIDs, _, err := slackAPI.GetUsersInConversation(&slack.GetUsersInConversationParameters{
+			ChannelID: channelID,
+		})
+		if err != nil {
+			log.Println("[error] failed to get users in channel", channelID, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		log.Println("[info] channel members", userIDs)
+		if len(userIDs) > 0 {
+			us, err := slackAPI.GetUsersInfo(userIDs...)
+			if err != nil {
+				log.Println("[error] failed to get users info", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			users = *us
+		}
+	}
+
+	r.Header.Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ConnectResponse{
 		OK:  true,
-		URL: "ws://localhost:8888/websocket",
+		URL: "ws://localhost:8888/websocket/",
+		Metadata: Metadata{
+			Users: users,
+		},
 	})
 }
 
@@ -149,9 +187,7 @@ func wsFunc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-
-	ch, unsubscribe := pubsub.Subscribe()
-	defer unsubscribe()
+	defer time.Sleep(time.Second) // slow down
 
 	if err := conn.WriteJSON(slack.Event{
 		Type: "hello",
@@ -159,6 +195,9 @@ func wsFunc(w http.ResponseWriter, r *http.Request) {
 		log.Println("[error]", err)
 		return
 	}
+
+	ch, unsubscribe := pubsub.Subscribe()
+	defer unsubscribe()
 
 	go func() {
 		for msg := range ch {
@@ -180,7 +219,7 @@ func wsFunc(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if event.Type == "ping" {
-			log.Println("[info] ping received")
+			log.Println("[debug] ping received")
 			if err := conn.WriteJSON(slack.Event{
 				Type: "pong",
 			}); err != nil {
