@@ -40,7 +40,6 @@ func New(port int) (*App, error) {
 		os.Getenv("SLACK_BOT_TOKEN"),
 		slack.OptionAppLevelToken(os.Getenv("SLACK_APP_TOKEN")),
 		slack.OptionDebug(Debug),
-		slack.OptionLog(log.New(os.Stdout, "api: ", log.Lshortfile|log.LstdFlags)),
 	)
 	authTest, authTestErr := app.slackAPI.AuthTest()
 	if authTestErr != nil {
@@ -162,7 +161,7 @@ func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 	userIDs = lo.Uniq(userIDs)
 
 	if len(userIDs) > 0 {
-		chunk := lo.Chunk(userIDs, 30)
+		chunk := lo.Chunk(userIDs, 30) // 31以上だと too_many_users エラーになる
 		for _, ids := range chunk {
 			us, err := app.slackAPI.GetUsersInfo(ids...)
 			if err != nil {
@@ -197,14 +196,14 @@ func (app *App) wsFunc(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	followChannels := make(map[string]bool, len(channelIDs))
+	followChannels := sync.Map{}
 	for _, id := range channelIDs {
-		followChannels[id] = true
+		followChannels.Store(id, struct{}{})
 	}
 	filter := func(m message) bool {
 		switch m := m.(type) {
 		case *slackevents.MessageEvent:
-			_, ok := followChannels[m.Channel]
+			_, ok := followChannels.Load(m.Channel)
 			return ok
 		default:
 			return false
