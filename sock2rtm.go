@@ -146,8 +146,9 @@ func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Println("[info] start for channels", channelIDs)
 	usersMap := map[string]slack.User{}
+	userIDs := []string{}
 	for _, channelID := range channelIDs {
-		userIDs, _, err := app.slackAPI.GetUsersInConversation(&slack.GetUsersInConversationParameters{
+		uids, _, err := app.slackAPI.GetUsersInConversation(&slack.GetUsersInConversationParameters{
 			ChannelID: channelID,
 		})
 		if err != nil {
@@ -155,20 +156,23 @@ func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		log.Printf("[info] channel %s members %d %s", channelID, len(userIDs), userIDs)
-		if len(userIDs) > 0 {
-			chunk := lo.Chunk(userIDs, 30)
-			for _, ids := range chunk {
-				us, err := app.slackAPI.GetUsersInfo(ids...)
-				if err != nil {
-					log.Println("[error] failed to get users info", err)
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				for _, u := range *us {
-					u := u
-					usersMap[u.ID] = u
-				}
+		log.Printf("[info] channel %s members %d %s", channelID, len(uids), uids)
+		userIDs = append(userIDs, uids...)
+	}
+	userIDs = lo.Uniq(userIDs)
+
+	if len(userIDs) > 0 {
+		chunk := lo.Chunk(userIDs, 30)
+		for _, ids := range chunk {
+			us, err := app.slackAPI.GetUsersInfo(ids...)
+			if err != nil {
+				log.Println("[error] failed to get users info", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			for _, u := range *us {
+				u := u
+				usersMap[u.ID] = u
 			}
 		}
 	}
