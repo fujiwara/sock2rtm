@@ -12,8 +12,8 @@ run: sock2rtm
 dist/:
 	goreleaser build --snapshot --rm-dist
 
-docker-push: dist/
-		rsync -av dist/sock2rtm_linux_amd64_v1 dist/sock2rtm_linux_amd64
+release-image: dist/
+		ln -sf dist/sock2rtm_linux_amd64_v1 dist/sock2rtm_linux_amd64
 		docker buildx build \
 			--build-arg VERSION=${GIT_VER} \
 			--platform linux/amd64,linux/arm64 \

@@ -34,3 +34,6 @@ jobs:
           registry: ghcr.io
           username: $GITHUB_ACTOR
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: release image
+        run: |
+          make release-image
