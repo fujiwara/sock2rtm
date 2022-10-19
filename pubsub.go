@@ -14,14 +14,22 @@ type PubSub struct {
 
 type Subscriber struct {
 	ID          string
-	C           chan message
+	C           chan Message
 	Unsubscribe func()
-	filter      func(message) bool
+	filter      func(Message) bool
 }
 
-func (p *PubSub) Subscribe(filter func(message) bool) *Subscriber {
+type Message interface{}
+
+func NewPubSub() *PubSub {
+	return &PubSub{
+		Subscribers: map[string]*Subscriber{},
+	}
+}
+
+func (p *PubSub) Subscribe(filter func(Message) bool) *Subscriber {
 	id := uuid.New().String()
-	ch := make(chan message)
+	ch := make(chan Message)
 	log.Println("[info] new subscriber", id)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -42,7 +50,7 @@ func (p *PubSub) Unsubscribe(id string) {
 	delete(p.Subscribers, id)
 }
 
-func (p *PubSub) Publish(msg message) {
+func (p *PubSub) Publish(msg Message) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for id, s := range p.Subscribers {
@@ -66,5 +74,3 @@ func (p *PubSub) Close() {
 	}
 	p.Subscribers = map[string]*Subscriber{}
 }
-
-type message interface{}

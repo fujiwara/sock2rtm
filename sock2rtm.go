@@ -30,18 +30,17 @@ type App struct {
 
 func New(port int) (*App, error) {
 	app := &App{
-		pubsub: &PubSub{
-			Subscribers: make(map[string]*Subscriber),
-		},
-		port: port,
+		pubsub: NewPubSub(),
+		port:   port,
+		slackAPI: slack.New(
+			os.Getenv("SLACK_BOT_TOKEN"),
+			slack.OptionAppLevelToken(os.Getenv("SLACK_APP_TOKEN")),
+			slack.OptionDebug(Debug),
+		),
 	}
-
-	app.slackAPI = slack.New(
-		os.Getenv("SLACK_BOT_TOKEN"),
-		slack.OptionAppLevelToken(os.Getenv("SLACK_APP_TOKEN")),
-		slack.OptionDebug(Debug),
-	)
-	authTest, authTestErr := app.slackAPI.AuthTest()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	authTest, authTestErr := app.slackAPI.AuthTestContext(ctx)
 	if authTestErr != nil {
 		return nil, fmt.Errorf("SLACK_BOT_TOKEN is invalid: %w", authTestErr)
 	}
@@ -138,6 +137,7 @@ func parseChannelIDs(path string) ([]string, error) {
 }
 
 func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	channelIDs, err := parseChannelIDs(r.URL.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -147,7 +147,7 @@ func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 	usersMap := map[string]slack.User{}
 	userIDs := []string{}
 	for _, channelID := range channelIDs {
-		uids, _, err := app.slackAPI.GetUsersInConversation(&slack.GetUsersInConversationParameters{
+		uids, _, err := app.slackAPI.GetUsersInConversationContext(ctx, &slack.GetUsersInConversationParameters{
 			ChannelID: channelID,
 		})
 		if err != nil {
@@ -163,7 +163,7 @@ func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 	if len(userIDs) > 0 {
 		chunk := lo.Chunk(userIDs, 30) // 31以上だと too_many_users エラーになる
 		for _, ids := range chunk {
-			us, err := app.slackAPI.GetUsersInfo(ids...)
+			us, err := app.slackAPI.GetUsersInfoContext(ctx, ids...)
 			if err != nil {
 				log.Println("[error] failed to get users info", err)
 				w.WriteHeader(http.StatusInternalServerError)
@@ -200,7 +200,7 @@ func (app *App) wsFunc(w http.ResponseWriter, r *http.Request) {
 	for _, id := range channelIDs {
 		followChannels.Store(id, struct{}{})
 	}
-	filter := func(m message) bool {
+	filter := func(m Message) bool {
 		switch m := m.(type) {
 		case *slackevents.MessageEvent:
 			_, ok := followChannels.Load(m.Channel)
