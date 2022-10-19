@@ -4,7 +4,7 @@ SlackのSocketModeで受信したmessage eventをRTMのように配信するWebS
 
 ```
 sock2rtm -h
-Usage of ./sock2rtm:
+Usage of sock2rtm:
   -debug
         debug mode
   -port int
