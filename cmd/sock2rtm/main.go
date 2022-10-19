@@ -13,12 +13,20 @@ import (
 	"github.com/hashicorp/logutils"
 )
 
+var version = "current"
+
 func main() {
 	var port int
+	var showVersion bool
 	flag.IntVar(&port, "port", 8888, "port number")
 	flag.BoolVar(&sock2rtm.Debug, "debug", false, "debug mode")
+	flag.BoolVar(&showVersion, "version", false, "show version")
 	flag.VisitAll(envToFlag)
 	flag.Parse()
+	if showVersion {
+		log.Println("sock2rtm", version)
+		os.Exit(0)
+	}
 
 	filter := &logutils.LevelFilter{
 		Levels:   []logutils.LogLevel{"debug", "info", "warn", "error"},

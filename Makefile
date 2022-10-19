@@ -6,3 +6,6 @@ clean:
 
 run: sock2rtm
 	DEBUG=t ./sock2rtm
+
+dist/:
+	goreleaser build --snapshot --rm-dist
