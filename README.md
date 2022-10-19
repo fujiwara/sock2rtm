@@ -13,7 +13,11 @@ Usage of sock2rtm:
         show version
 ```
 
-環境変数 `SLACK_BOT_TOKEN` と `SLACK_APP_TOKEN` が必要です。
+- 環境変数 `SLACK_BOT_TOKEN` と `SLACK_APP_TOKEN` が必要です
+- botを動かすSlack Appには以下のOAuth scopeが必要です
+  - channels:history
+  - channels:read
+  - users:read
 
 ## API
 
