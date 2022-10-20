@@ -46,6 +46,30 @@ SlackのRTMのようにwebsocketでメッセージを配信します。
 - 配信されるのはmessage eventのみです
 - (botがjoinしているチャンネルのうち)URLで指定したチャンネルのメッセージのみ配信されます
 
+### `/metrics`
+
+メトリクスをJSON形式で出力します。
+
+```json
+{
+  "slack": {
+    "hello": 1,
+    "connecting": 1,
+    "connected": 1,
+    "disconnect": 0
+  },
+  "websocket": {
+    "total_connections": 9,
+    "current_connections": 1
+  },
+  "messages": {
+    "received_from_slack": 0,
+    "delivered_to_websocket": 0,
+    "unsupported_from_slack": 0,
+    "write_errored_to_websocket": 0
+  }
+}
+```
 
 ## LICENSE
 
