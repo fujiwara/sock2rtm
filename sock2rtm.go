@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -26,6 +27,7 @@ type App struct {
 	wg       sync.WaitGroup
 	pubsub   *PubSub
 	upgrader websocket.Upgrader
+	metrics  Metrics
 }
 
 func New(port int) (*App, error) {
@@ -81,16 +83,32 @@ func (app *App) runSocketModeReceiver(ctx context.Context) {
 				case slackevents.CallbackEvent:
 					switch event := eventPayload.InnerEvent.Data.(type) {
 					case *slackevents.MessageEvent:
+						atomic.AddInt64(&app.metrics.Messages.Received, 1)
 						log.Printf("[debug] publish message event: %s", data)
 						app.pubsub.Publish(event)
 					default:
-						log.Printf("[debug] skipped %s: %s", event, data)
+						atomic.AddInt64(&app.metrics.Messages.Unsupported, 1)
+						log.Printf("[warn] skipped %s: %s", event, data)
 					}
 				default:
-					log.Println("[info] unsupported Events API eventPayload received. type:", eventPayload.Type)
+					atomic.AddInt64(&app.metrics.Messages.Unsupported, 1)
+					log.Println("[warn] unsupported Events API eventPayload received. type:", eventPayload.Type)
 				}
+			case socketmode.EventTypeHello:
+				atomic.AddInt64(&app.metrics.Slack.Hello, 1)
+				log.Println("[info] socketmode hello")
+			case socketmode.EventTypeDisconnect:
+				atomic.AddInt64(&app.metrics.Slack.Disconnect, 1)
+				log.Println("[info] socketmode disconnect event received")
+			case socketmode.EventTypeConnecting:
+				atomic.AddInt64(&app.metrics.Slack.Connecting, 1)
+				log.Println("[info] socketmode connecting event received")
+			case socketmode.EventTypeConnected:
+				atomic.AddInt64(&app.metrics.Slack.Connected, 1)
+				log.Println("[info] socketmode connect event received")
 			default:
-				log.Printf("[debug] skipped: %v", envelope.Type)
+				atomic.AddInt64(&app.metrics.Messages.Unsupported, 1)
+				log.Printf("[warn] skipped: %v", envelope.Type)
 			}
 		}
 	}()
@@ -103,6 +121,7 @@ func (app *App) runWebSocketServer(ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/websocket/", app.wsFunc)
 	mux.HandleFunc("/start/", app.startFunc)
+	mux.HandleFunc("/metrics", app.metricsFunc)
 	addr := fmt.Sprintf(":%d", app.port)
 	srv := &http.Server{
 		Addr:    addr,
@@ -216,8 +235,13 @@ func (app *App) wsFunc(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	defer conn.Close()
-	defer time.Sleep(3 * time.Second) // slow down
+	atomic.AddInt64(&app.metrics.WebSocket.TotalConnections, 1)
+	atomic.AddInt64(&app.metrics.WebSocket.CurrentConnections, 1)
+	defer func() {
+		time.Sleep(3 * time.Second) // slow down
+		conn.Close()
+		atomic.AddInt64(&app.metrics.WebSocket.CurrentConnections, -1)
+	}()
 
 	if err := conn.WriteJSON(slack.Event{
 		Type: "hello",
@@ -233,7 +257,10 @@ func (app *App) wsFunc(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		for msg := range sub.C {
 			if err := conn.WriteJSON(msg); err != nil {
+				atomic.AddInt64(&app.metrics.Messages.WriteErrored, 1)
 				log.Printf("[warn] failed to write to %s %s", sub.ID, err)
+			} else {
+				atomic.AddInt64(&app.metrics.Messages.Delivered, 1)
 			}
 		}
 	}()
