@@ -147,17 +147,22 @@ type StartResponse struct {
 	Users []slack.User `json:"users"`
 }
 
-func parseChannelIDs(path string) ([]string, error) {
+func parsePathParams(path string) ([]string, string, error) {
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		return nil, fmt.Errorf("invalid path: %s", path)
+		return nil, "", fmt.Errorf("invalid path: %s", path)
 	}
-	return strings.Split(parts[2], ","), nil
+	channelIDs := strings.Split(parts[2], ",")
+	var clientID string
+	if len(parts) >= 4 {
+		clientID = parts[3]
+	}
+	return channelIDs, clientID, nil
 }
 
 func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	channelIDs, err := parseChannelIDs(r.URL.Path)
+	channelIDs, clientID, err := parsePathParams(r.URL.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -199,8 +204,10 @@ func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 		users = append(users, u)
 	}
 
-	r.Header.Set("Content-Type", "application/json")
 	wsURL := fmt.Sprintf("ws://%s%s/websocket/%s", r.Host, r.URL.Port(), strings.Join(channelIDs, ","))
+	if clientID != "" {
+		wsURL += "/" + clientID
+	}
 	log.Println("[info] websocket url", wsURL)
 	json.NewEncoder(w).Encode(StartResponse{
 		OK:    true,
@@ -210,7 +217,7 @@ func (app *App) startFunc(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *App) wsFunc(w http.ResponseWriter, r *http.Request) {
-	channelIDs, err := parseChannelIDs(r.URL.Path)
+	channelIDs, clientID, err := parsePathParams(r.URL.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -250,7 +257,7 @@ func (app *App) wsFunc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub := app.pubsub.Subscribe(filter)
+	sub := app.pubsub.Subscribe(clientID, filter)
 	defer sub.Unsubscribe()
 	log.Println("[info] new websocket connection from", r.RemoteAddr, "for channels", channelIDs, "id", sub.ID)
 
