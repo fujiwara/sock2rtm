@@ -21,17 +21,19 @@ Usage of sock2rtm:
 
 ## API
 
-### `/start/{channel_id_1},{channel_id_2}...`
+### `/start/{channel_id_1},{channel_id_2}.../{client_id}`
 
 Slackの`/api/rtm.start`(廃止済み)を模したレスポンスを返します。
 
 URL pathに指定したチャンネルID(`,`区切りで複数指定可能)にいるmemberの情報を取得して、レスポンスの`users`に含めます。
 
+URL pathにはクライアントの識別子(client_id)を付与できます。同一のclient_idを持った接続に対しては、メッセージは1つのクライアントにしか配信されません。
+
 ```console
-$ curl http://localhost:8888/start/C7MK19D7F,C0ATSF2MF
+$ curl http://localhost:8888/start/C7MK19D7F,C0ATSF2MF/my_client_id
 {
   "ok": true,
-  "url": "ws://localhost:8888/websocket/C7MK19D7F,C0ATSF2MF", // WebSocket接続用URL
+  "url": "ws://localhost:8888/websocket/C7MK19D7F,C0ATSF2MF/my_client_id", // WebSocket接続用URL
   "users": [{...}, {...},....], // ユーザー情報
 }
 ```
@@ -39,7 +41,7 @@ $ curl http://localhost:8888/start/C7MK19D7F,C0ATSF2MF
 - Perlの[AnyEvent::SlackRTM](https://metacpan.org/pod/AnyEvent::SlackRTM) を使用する場合、`$AnyEvent::SlackRTM::START_URL` をこのAPIのURLに書き変えてください
 - bot自身はチャンネルへのjoinは行いません。必要なチャンネルへinviteしてください
 
-### `/websocket/{channel_id_1},{channel_id_2}...`
+### `/websocket/{channel_id_1},{channel_id_2}.../{client_id}`
 
 SlackのRTMのようにwebsocketでメッセージを配信します。
 
