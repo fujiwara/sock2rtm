@@ -14,7 +14,7 @@ Usage of sock2rtm:
 ```
 
 - 環境変数 `SLACK_BOT_TOKEN` と `SLACK_APP_TOKEN` が必要です
-- Slack Appでは[Socket Modeを有効にする必要があります](https://api.slack.com/apis/connections/socket#toggling)
+- Slack Appでは[Socket Mode](https://api.slack.com/apis/connections/socket#toggling)と[Events API](https://api.slack.com/apis/connections/events-api)を有効にする必要があります
 - botを動かすSlack Appには以下のOAuth scopeが必要です
   - channels:history
   - channels:read
